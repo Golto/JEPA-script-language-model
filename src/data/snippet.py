@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-_SPEC_PATTERN = re.compile(r'^// (\w+): (.+?) \[(.+?)\] -> (.+)$')
+_SPEC_PATTERN = re.compile(r'^// (\w+): (.+) \[(.*?)\] -> (.+)$')
 
 
 @dataclass
@@ -68,9 +68,19 @@ def _parse_spec_line(line: str) -> tuple[str, str, list[ParamSpec], str]:
     name, description, params_raw, return_type = match.groups()
 
     params: list[ParamSpec] = []
-    for param_token in params_raw.split(', '):
-        param_name, param_type = param_token.split(': ', 1)
-        params.append(ParamSpec(name=param_name.strip(), type_name=param_type.strip()))
+    if params_raw.strip():
+        # Support both "name: type, ..." and bare "name name2 ..." formats.
+        tokens = (
+            params_raw.split(', ')
+            if ': ' in params_raw
+            else params_raw.split()
+        )
+        for param_token in tokens:
+            if ': ' in param_token:
+                param_name, param_type = param_token.split(': ', 1)
+            else:
+                param_name, param_type = param_token, ''
+            params.append(ParamSpec(name=param_name.strip(), type_name=param_type.strip()))
 
     return name, description, params, return_type.strip()
 
