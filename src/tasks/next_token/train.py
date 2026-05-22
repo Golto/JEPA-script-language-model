@@ -206,7 +206,7 @@ def finetune_next_token(config: NTPFinetuneConfig) -> NextTokenPredictor:
     # ----------------------------------------------------------------
     # Final save and plots
     # ----------------------------------------------------------------
-    _save_final_models(model, config.output_dir)
+    _save_final_models(model, config.output_dir, config.pretrained_encoder)
     _save_plots(history_epochs, history_train_loss, history_val_loss, history_val_ppl, history_val_acc, config.output_dir)
     print(f"Output saved to {config.output_dir}")
 
@@ -297,19 +297,35 @@ def _save_checkpoint(
     print(f"  -- checkpoint saved: {path.name}")
 
 
-def _save_final_models(model: NextTokenPredictor, output_dir: Path) -> None:
+def _save_final_models(
+    model: NextTokenPredictor,
+    output_dir: Path,
+    pretrained_encoder: Path,
+) -> None:
     """Save final model artifacts.
 
-    Writes two files:
+    Writes three files:
         next_token_predictor_final.pt  -- full model (encoder + LM head)
         lm_head_final.pt               -- LM head only (lightweight artifact)
+        model_config.json              -- encoder architecture config copied from the
+                                         JEPA output dir so this directory is
+                                         self-contained for inference
 
     Args:
         model: The fine-tuned NextTokenPredictor.
         output_dir: Directory where the files are written.
+        pretrained_encoder: Path to the JEPA context_encoder_final.pt used during
+            fine-tuning. model_config.json is copied from the same directory.
     """
+    import shutil
+
     torch.save(model.state_dict(), output_dir / 'next_token_predictor_final.pt')
     torch.save(model.lm_head.state_dict(), output_dir / 'lm_head_final.pt')
+
+    src_config = pretrained_encoder.with_name('model_config.json')
+    if src_config.exists():
+        shutil.copy(src_config, output_dir / 'model_config.json')
+
     print(f"  -- final models saved to {output_dir}")
 
 

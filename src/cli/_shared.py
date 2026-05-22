@@ -7,11 +7,15 @@ the core embed_program routine so that embed and compare stay thin.
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from src.model import ContextEncoder, EncoderConfig
 from src.tokenizer import LanguageTokenizer
+
+if TYPE_CHECKING:
+    from src.tasks.next_token.model import NextTokenPredictor
 
 
 # ----------------------------------------------------------------
@@ -90,6 +94,48 @@ def load_context_encoder(model_path: str) -> tuple[ContextEncoder, LanguageToken
 # ----------------------------------------------------------------
 # Embedding
 # ----------------------------------------------------------------
+
+def load_next_token_predictor(model_path: str) -> tuple['NextTokenPredictor', LanguageTokenizer]:
+    """Load a NextTokenPredictor from a .pt file and its sibling model_config.json.
+
+    model_config.json is written automatically by the fine-tuning pipeline
+    next to next_token_predictor_final.pt. If it is missing, re-run fine-tuning
+    to regenerate it.
+
+    Args:
+        model_path: Path to next_token_predictor_final.pt.
+
+    Returns:
+        A tuple of (predictor in eval mode, tokenizer).
+
+    Raises:
+        SystemExit: If either the .pt file or model_config.json is missing.
+    """
+    from src.tasks.next_token.model import NextTokenPredictor, NTPConfig
+
+    pt_path = Path(model_path)
+    config_path = pt_path.with_name('model_config.json')
+
+    if not pt_path.exists():
+        sys.exit(f"Error: model file not found: {model_path}")
+    if not config_path.exists():
+        sys.exit(
+            f"Error: model_config.json not found next to {pt_path.name}.\n"
+            f"Re-run fine-tuning to regenerate it alongside the checkpoint."
+        )
+
+    with config_path.open(encoding='utf-8') as config_file:
+        config_dict = json.load(config_file)
+
+    encoder_config = EncoderConfig(**config_dict)
+    config = NTPConfig(encoder=encoder_config)
+    model = NextTokenPredictor(config)
+    state_dict = torch.load(pt_path, map_location='cpu', weights_only=True)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    return model, LanguageTokenizer()
+
 
 def embed_program(
     encoder: ContextEncoder,
