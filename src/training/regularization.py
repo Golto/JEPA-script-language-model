@@ -46,8 +46,8 @@ class VICRegConfig:
             to be smaller, so a lower default is appropriate.
     """
 
-    lambda_var: float = 1.0
-    lambda_cov: float = 0.1
+    lambda_var: float = 0.25
+    lambda_cov: float = 0.04
 
 
 # ----------------------------------------------------------------

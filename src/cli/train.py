@@ -56,8 +56,8 @@ def add_train_parser(subparsers: argparse._SubParsersAction) -> None:
     training.add_argument('--log-every',    type=int,   default=10,    help='Steps between console log lines (default: 10).')
     training.add_argument('--save-every',   type=int,   default=10,    help='Epochs between checkpoints (default: 10).')
     training.add_argument('--grad-clip',    type=float, default=1.0,   help='Max gradient norm for clipping. 0.0 disables (default: 1.0).')
-    training.add_argument('--lambda-var',   type=float, default=1.0,   help='VICReg variance loss weight (default: 1.0). Increase if collapse persists.')
-    training.add_argument('--lambda-cov',   type=float, default=0.1,   help='VICReg covariance loss weight (default: 0.1).')
+    training.add_argument('--lambda-var',   type=float, default=0.25,  help='VICReg variance loss weight (default: 0.25). Increase if collapse persists; decrease if cos_sim drops too low.')
+    training.add_argument('--lambda-cov',   type=float, default=0.04,  help='VICReg covariance loss weight (default: 0.04).')
     training.add_argument('--device',       type=str,   default='cpu', help='Torch device string, e.g. cpu or cuda (default: cpu).')
 
     # ----------------------------------------------------------------
