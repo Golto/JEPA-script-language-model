@@ -5,6 +5,7 @@ description = "JEPA ml architecture for scripting language"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "gradio>=5.0.0",
     "matplotlib>=3.10.9",
     "torch>=2.12.0",
 ]
