@@ -15,6 +15,7 @@ import argparse
 
 from .compare import add_compare_parser, run_compare
 from .embed import add_embed_parser, run_embed
+from .finetune import add_finetune_parser, run_finetune
 from .train import add_train_parser, run_train
 
 
@@ -29,6 +30,7 @@ def main() -> None:
     add_embed_parser(subparsers)
     add_compare_parser(subparsers)
     add_train_parser(subparsers)
+    add_finetune_parser(subparsers)
 
     args = parser.parse_args()
 
@@ -38,3 +40,5 @@ def main() -> None:
         run_compare(args)
     elif args.command == 'train':
         run_train(args)
+    elif args.command == 'finetune':
+        run_finetune(args)
