@@ -30,6 +30,7 @@ from src.model import JEPAConfig, JEPAModel
 from src.tokenizer import LanguageTokenizer
 
 from .metrics import compute_collapse_metrics
+from .regularization import VICRegConfig, compute_vicreg_loss
 
 
 # ----------------------------------------------------------------
@@ -50,6 +51,11 @@ class PretrainConfig:
         weight_decay: AdamW weight decay.
         max_seq_len: Maximum token sequence length. Longer programs are truncated.
         log_every: Number of steps between console log lines.
+        save_every: Number of epochs between checkpoint saves.
+        n_blocks: Structural blocks masked per sample. Increase to harden the task.
+        vicreg: VICReg regularization weights. Controls the anti-collapse terms
+            applied to z_context. Set lambda_var=0 and lambda_cov=0 to disable.
+        grad_clip: Maximum gradient norm for clipping. 0.0 disables clipping.
         device: Torch device string ('cpu', 'cuda', 'cuda:0', ...).
         collapse_std_threshold: embedding_std below this value triggers a
             collapse warning.
@@ -68,9 +74,16 @@ class PretrainConfig:
     log_every: int = 10
     save_every: int = 10
     n_blocks: int = 1
+    vicreg: VICRegConfig = None  # type: ignore[assignment]  -- set in __post_init__
+    grad_clip: float = 1.0
     device: str = 'cpu'
     collapse_std_threshold: float = 0.05
     collapse_cosine_threshold: float = 0.95
+
+    def __post_init__(self) -> None:
+        # Default to a fresh VICRegConfig rather than using a mutable default arg.
+        if self.vicreg is None:
+            self.vicreg = VICRegConfig()
 
 
 # ----------------------------------------------------------------
@@ -128,6 +141,7 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
     # Training loop
     # ----------------------------------------------------------------
     history_loss: list[float] = []
+    history_reg: list[float] = []
     history_std: list[float] = []
     history_cosine: list[float] = []
     history_steps: list[int] = []
@@ -153,19 +167,25 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
 
             masked_z_hat = output.z_hat[structural_mask]
             masked_z_target = output.z_target[structural_mask]
-            loss = F.mse_loss(masked_z_hat, masked_z_target)
+            mse_loss = F.mse_loss(masked_z_hat, masked_z_target)
+
+            reg = compute_vicreg_loss(output.z_context, config.vicreg, padding_mask)
+            loss = mse_loss + reg.total
 
             loss.backward()
+            if config.grad_clip > 0.0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
             optimizer.step()
             model.update_target_encoder()
 
             global_step += 1
-            epoch_loss_sum += loss.item()
+            epoch_loss_sum += mse_loss.item()
             epoch_steps += 1
 
             if global_step % config.log_every == 0:
                 metrics = compute_collapse_metrics(output.z_target.detach(), padding_mask)
-                history_loss.append(loss.item())
+                history_loss.append(mse_loss.item())
+                history_reg.append(reg.total.item())
                 history_std.append(metrics['embedding_std'])
                 history_cosine.append(metrics['mean_cosine_sim'])
                 history_steps.append(global_step)
@@ -178,7 +198,8 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
 
                 print(
                     f"epoch {epoch:3d}  step {global_step:5d}"
-                    f"  loss {loss.item():.4f}"
+                    f"  mse {mse_loss.item():.4f}"
+                    f"  reg {reg.total.item():.4f}"
                     f"  emb_std {metrics['embedding_std']:.4f}"
                     f"  cos_sim {metrics['mean_cosine_sim']:.4f}"
                     + collapse_warning
@@ -199,7 +220,7 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
     # ----------------------------------------------------------------
     # Plots
     # ----------------------------------------------------------------
-    _save_plots(history_steps, history_loss, history_std, history_cosine, config.output_dir)
+    _save_plots(history_steps, history_loss, history_reg, history_std, history_cosine, config.output_dir)
     print(f"Plots saved to {config.output_dir}")
 
     return model
@@ -274,6 +295,7 @@ def _save_final_models(model: JEPAModel, jepa_config: JEPAConfig, output_dir: Pa
 def _save_plots(
     steps: list[int],
     loss: list[float],
+    reg: list[float],
     embedding_std: list[float],
     cosine_sim: list[float],
     output_dir: Path,
@@ -283,6 +305,7 @@ def _save_plots(
     Args:
         steps: Global step indices at which metrics were recorded.
         loss: MSE loss values.
+        reg: VICReg regularization loss values (weighted total).
         embedding_std: Per-dimension embedding std values.
         cosine_sim: Mean pairwise cosine similarity values.
         output_dir: Directory where PNG files are written.
@@ -291,12 +314,14 @@ def _save_plots(
     matplotlib.use('Agg')  # non-interactive backend, safe for scripts
     import matplotlib.pyplot as plt
 
-    # Loss curve
+    # Loss curve: MSE + reg on same axis, two lines
     fig, axis = plt.subplots(figsize=(8, 4))
-    axis.plot(steps, loss, linewidth=1.5)
+    axis.plot(steps, loss, linewidth=1.5, label='MSE loss')
+    axis.plot(steps, reg,  linewidth=1.5, label='VICReg loss', linestyle='--')
     axis.set_xlabel('Step')
-    axis.set_ylabel('MSE Loss')
+    axis.set_ylabel('Loss')
     axis.set_title('JEPA Pre-training Loss')
+    axis.legend(fontsize=9)
     axis.grid(True, alpha=0.3)
     fig.tight_layout()
     fig.savefig(output_dir / 'training_loss.png', dpi=150)

@@ -11,6 +11,7 @@ from pathlib import Path
 from src.model import EncoderConfig, JEPAConfig, MLPPredictorConfig
 from src.tokenizer import LanguageTokenizer
 from src.training.pretrain import PretrainConfig, pretrain
+from src.training.regularization import VICRegConfig
 
 
 def add_train_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -54,6 +55,9 @@ def add_train_parser(subparsers: argparse._SubParsersAction) -> None:
     training.add_argument('--max-seq-len',  type=int,   default=256,   help='Maximum token sequence length (default: 256).')
     training.add_argument('--log-every',    type=int,   default=10,    help='Steps between console log lines (default: 10).')
     training.add_argument('--save-every',   type=int,   default=10,    help='Epochs between checkpoints (default: 10).')
+    training.add_argument('--grad-clip',    type=float, default=1.0,   help='Max gradient norm for clipping. 0.0 disables (default: 1.0).')
+    training.add_argument('--lambda-var',   type=float, default=1.0,   help='VICReg variance loss weight (default: 1.0). Increase if collapse persists.')
+    training.add_argument('--lambda-cov',   type=float, default=0.1,   help='VICReg covariance loss weight (default: 0.1).')
     training.add_argument('--device',       type=str,   default='cpu', help='Torch device string, e.g. cpu or cuda (default: cpu).')
 
     # ----------------------------------------------------------------
@@ -109,6 +113,8 @@ def run_train(args: argparse.Namespace) -> None:
         max_seq_len=args.max_seq_len,
         log_every=args.log_every,
         save_every=args.save_every,
+        vicreg=VICRegConfig(lambda_var=args.lambda_var, lambda_cov=args.lambda_cov),
+        grad_clip=args.grad_clip,
         device=args.device,
     )
 
