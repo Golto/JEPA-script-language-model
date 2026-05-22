@@ -48,16 +48,24 @@ class ContextEncoder(nn.Module):
             enable_nested_tensor=False,
         )
         self.output_norm = nn.LayerNorm(config.d_model)
+        # Learned embedding substituted at structurally masked positions.
+        # Initialized near zero so the model starts by predicting from context.
+        self.mask_token = nn.Parameter(torch.zeros(config.d_model))
 
     def forward(
         self,
         token_ids: torch.Tensor,
+        token_mask: torch.Tensor | None = None,
         padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Encode a batch of token sequences into contextual representations.
 
         Args:
             token_ids: Integer token indices, shape (batch, seq_len).
+            token_mask: Boolean mask where True marks positions that should be
+                replaced by the learned mask embedding before encoding,
+                shape (batch, seq_len). Used for JEPA structural masking.
+                Pass None when encoding without masking (e.g. target encoder).
             padding_mask: Boolean mask where True marks padding positions that
                 should be ignored by attention, shape (batch, seq_len).
                 Pass None when there is no padding.
@@ -79,6 +87,12 @@ class ContextEncoder(nn.Module):
         x = self.embedding_dropout(
             self.token_embedding(token_ids) + self.position_embedding(positions)
         )
+
+        if token_mask is not None:
+            # Replace masked positions with the learned mask token embedding.
+            # Broadcasting: mask_token is (d_model,) -> expand to (batch, seq_len, d_model).
+            mask_fill = self.mask_token.view(1, 1, -1).expand_as(x)
+            x = torch.where(token_mask.unsqueeze(-1), mask_fill, x)
 
         attn_mask: torch.Tensor | None = None
         if self.config.is_causal:
