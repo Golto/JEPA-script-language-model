@@ -15,6 +15,7 @@ from src.model import ContextEncoder, EncoderConfig
 from src.tokenizer import LanguageTokenizer
 
 if TYPE_CHECKING:
+    from src.tasks.classification.model import ProgramClassifier
     from src.tasks.next_token.model import NextTokenPredictor
 
 
@@ -135,6 +136,54 @@ def load_next_token_predictor(model_path: str) -> tuple['NextTokenPredictor', La
     model.eval()
 
     return model, LanguageTokenizer()
+
+
+def load_program_classifier(
+    model_path: str,
+) -> tuple['ProgramClassifier', LanguageTokenizer, dict[str, int]]:
+    """Load a ProgramClassifier from a .pt file and its sibling JSON files.
+
+    Expects model_config.json and label_vocab.json in the same directory as
+    the .pt file. Both are written automatically by the classification
+    fine-tuning pipeline.
+
+    Args:
+        model_path: Path to classifier_final.pt.
+
+    Returns:
+        A tuple of (classifier in eval mode, tokenizer, label_vocab).
+        label_vocab maps label strings to integer class indices.
+
+    Raises:
+        SystemExit: If the .pt file, model_config.json, or label_vocab.json
+            is missing.
+    """
+    from src.tasks.classification.model import ClassifierConfig, ProgramClassifier
+
+    pt_path = Path(model_path)
+    config_path = pt_path.with_name('model_config.json')
+    vocab_path = pt_path.with_name('label_vocab.json')
+
+    if not pt_path.exists():
+        sys.exit(f"Error: model file not found: {model_path}")
+    if not config_path.exists():
+        sys.exit(f"Error: model_config.json not found next to {pt_path.name}.")
+    if not vocab_path.exists():
+        sys.exit(f"Error: label_vocab.json not found next to {pt_path.name}.")
+
+    with config_path.open(encoding='utf-8') as config_file:
+        config_dict = json.load(config_file)
+    with vocab_path.open(encoding='utf-8') as vocab_file:
+        label_vocab: dict[str, int] = json.load(vocab_file)
+
+    encoder_config = EncoderConfig(**config_dict)
+    config = ClassifierConfig(encoder=encoder_config, n_classes=len(label_vocab))
+    model = ProgramClassifier(config)
+    state_dict = torch.load(pt_path, map_location='cpu', weights_only=True)
+    model.load_state_dict(state_dict)
+    model.eval()
+
+    return model, LanguageTokenizer(), label_vocab
 
 
 def embed_program(

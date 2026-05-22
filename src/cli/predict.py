@@ -1,12 +1,15 @@
-"""CLI command: run next-token prediction inference on a program.
+"""CLI command: run inference with a fine-tuned task model.
 
 Subcommands:
     next-token  -- show summary stats, top-k candidates at the last position,
                    optional per-position table, optional greedy generation
+    classify    -- predict a structural property of a program and show
+                   class probabilities
 
 Usage:
     uv run main.py predict next-token --model PATH [PROGRAM] [-f FILE]
                                       [--top-k K] [--generate N] [--verbose]
+    uv run main.py predict classify   --model PATH [PROGRAM] [-f FILE]
 """
 
 import argparse
@@ -16,10 +19,15 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from src.cli._shared import load_next_token_predictor, resolve_sources
+from src.cli._shared import (
+    load_next_token_predictor,
+    load_program_classifier,
+    resolve_sources,
+)
 from src.tokenizer import LanguageTokenizer
 
 if TYPE_CHECKING:
+    from src.tasks.classification.model import ProgramClassifier
     from src.tasks.next_token.model import NextTokenPredictor
 
 
@@ -35,11 +43,12 @@ def add_predict_parser(subparsers: argparse._SubParsersAction) -> None:
     """
     parser = subparsers.add_parser(
         'predict',
-        help='Run next-token prediction inference on a program.',
-        description='Run inference with a fine-tuned next-token prediction model.',
+        help='Run inference with a fine-tuned task model.',
+        description='Run inference with a fine-tuned next-token or classification model.',
     )
     task_subparsers = parser.add_subparsers(dest='task', required=True)
     _add_next_token_predict_parser(task_subparsers)
+    _add_classify_predict_parser(task_subparsers)
 
 
 def run_predict(args: argparse.Namespace) -> None:
@@ -50,6 +59,8 @@ def run_predict(args: argparse.Namespace) -> None:
     """
     if args.task == 'next-token':
         _run_next_token_predict(args)
+    elif args.task == 'classify':
+        _run_classify_predict(args)
 
 
 # ----------------------------------------------------------------
@@ -151,6 +162,84 @@ def _run_next_token_predict(args: argparse.Namespace) -> None:
 
     if args.generate > 0:
         _print_generation(token_ids, model, tokenizer, n_tokens=args.generate)
+
+
+# ----------------------------------------------------------------
+# classify subcommand
+# ----------------------------------------------------------------
+
+def _add_classify_predict_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the classify inference subcommand.
+
+    Args:
+        subparsers: The subparsers action from the predict parser.
+    """
+    parser = subparsers.add_parser(
+        'classify',
+        help='Predict a structural property of a program.',
+        description=(
+            'Tokenize a program, run the fine-tuned ProgramClassifier, '
+            'and print the predicted class with all class probabilities.'
+        ),
+    )
+    parser.add_argument(
+        '--model', '-m',
+        required=True,
+        metavar='PATH',
+        help=(
+            'Path to classifier_final.pt. '
+            'model_config.json and label_vocab.json must be in the same directory.'
+        ),
+    )
+    parser.add_argument(
+        'source',
+        nargs='?',
+        default=None,
+        metavar='PROGRAM',
+        help='Program text inline on the command line. Omit if using -f.',
+    )
+    parser.add_argument(
+        '-f', '--file',
+        default=None,
+        metavar='FILE',
+        help='Read the program from this file instead of the command line.',
+    )
+
+
+def _run_classify_predict(args: argparse.Namespace) -> None:
+    """Execute classification inference and print results.
+
+    Args:
+        args: Parsed arguments from the classify subparser.
+    """
+    inline = [args.source] if args.source else []
+    files = [args.file] if args.file else []
+    sources = resolve_sources(inline, files)
+    if len(sources) != 1:
+        sys.exit("Error: provide exactly one program -- either a string or -f FILE.")
+
+    model, tokenizer, label_vocab = load_program_classifier(args.model)
+    id_to_label = {index: label for label, index in label_vocab.items()}
+
+    token_ids = tokenizer.encode(sources[0].strip(), add_special_tokens=True)
+    token_ids_tensor = torch.tensor([token_ids], dtype=torch.long)
+    padding_mask = torch.zeros(1, len(token_ids), dtype=torch.bool)
+
+    with torch.no_grad():
+        logits = model(token_ids_tensor, padding_mask)  # (1, n_classes)
+
+    probs = torch.softmax(logits[0], dim=-1)
+    predicted_index = probs.argmax().item()
+    predicted_label = id_to_label[predicted_index]
+
+    print(f"Tokens:    {len(token_ids)}")
+    print(f"Predicted: {predicted_label!r}  ({probs[predicted_index].item() * 100:.1f}%)")
+    print()
+    print("All classes:")
+    for index, prob in sorted(enumerate(probs.tolist()), key=lambda x: -x[1]):
+        label = id_to_label[index]
+        marker = ' <--' if index == predicted_index else ''
+        print(f"  {label!r:<20} {prob * 100:6.2f}%{marker}")
 
 
 # ----------------------------------------------------------------
