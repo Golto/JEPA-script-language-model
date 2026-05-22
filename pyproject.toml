@@ -7,5 +7,11 @@ requires-python = ">=3.13"
 dependencies = [
     "gradio>=5.0.0",
     "matplotlib>=3.10.9",
+    "onnx>=1.16.0",
     "torch>=2.12.0",
+]
+
+[project.optional-dependencies]
+verify = [
+    "onnxruntime>=1.18.0",
 ]
