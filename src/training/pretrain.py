@@ -16,6 +16,8 @@ Saved files:
     collapse_metrics.png
 """
 
+import dataclasses
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,6 +67,7 @@ class PretrainConfig:
     max_seq_len: int = 256
     log_every: int = 10
     save_every: int = 10
+    n_blocks: int = 1
     device: str = 'cpu'
     collapse_std_threshold: float = 0.05
     collapse_cosine_threshold: float = 0.95
@@ -98,7 +101,7 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
     tokenizer = LanguageTokenizer()
     snippets = load_all_snippets(config.data_dir)
     programs = [program for snippet in snippets for program in snippet.programs]
-    dataset = JEPADataset(programs, tokenizer, max_seq_len=config.max_seq_len)
+    dataset = JEPADataset(programs, tokenizer, max_seq_len=config.max_seq_len, n_blocks=config.n_blocks)
     dataloader = DataLoader(
         dataset,
         batch_size=config.batch_size,
@@ -191,7 +194,7 @@ def pretrain(config: PretrainConfig) -> JEPAModel:
     # ----------------------------------------------------------------
     # Final models
     # ----------------------------------------------------------------
-    _save_final_models(model, config.output_dir)
+    _save_final_models(model, config.jepa, config.output_dir)
 
     # ----------------------------------------------------------------
     # Plots
@@ -237,21 +240,30 @@ def _save_checkpoint(
     print(f"  -- checkpoint saved: {path.name}")
 
 
-def _save_final_models(model: JEPAModel, output_dir: Path) -> None:
+def _save_final_models(model: JEPAModel, jepa_config: JEPAConfig, output_dir: Path) -> None:
     """Save the final model artifacts after training completes.
 
-    Writes two files:
+    Writes three files:
         jepa_final.pt            -- full JEPAModel state dict (all components)
         context_encoder_final.pt -- context encoder only (the artifact kept
                                     after pre-training; load into a fresh
                                     ContextEncoder for downstream use)
+        model_config.json        -- EncoderConfig serialized as JSON so the
+                                    CLI can reconstruct the architecture without
+                                    any extra flags
 
     Args:
         model: The trained JEPAModel.
+        jepa_config: The JEPAConfig used to build the model (encoder config is extracted).
         output_dir: Directory where the files are written.
     """
     torch.save(model.state_dict(), output_dir / 'jepa_final.pt')
     torch.save(model.context_encoder.state_dict(), output_dir / 'context_encoder_final.pt')
+
+    config_dict = dataclasses.asdict(jepa_config.encoder)
+    with (output_dir / 'model_config.json').open('w', encoding='utf-8') as config_file:
+        json.dump(config_dict, config_file, indent=2)
+
     print(f"  -- final models saved to {output_dir}")
 
 

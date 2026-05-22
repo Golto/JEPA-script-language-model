@@ -48,6 +48,9 @@ class JEPADataset(Dataset):
         max_seq_len: Maximum sequence length. Longer programs are truncated.
         min_tokens: Minimum number of tokens (after encoding) to include a
             program. Filters out trivially short sequences.
+        n_blocks: Number of structural blocks to mask per sample. Increasing
+            this value makes the pre-training task harder and reduces the risk
+            of representation collapse.
     """
 
     def __init__(
@@ -56,9 +59,11 @@ class JEPADataset(Dataset):
         tokenizer: LanguageTokenizer,
         max_seq_len: int = 256,
         min_tokens: int = 5,
+        n_blocks: int = 1,
     ):
         self._tokenizer = tokenizer
         self._max_seq_len = max_seq_len
+        self._n_blocks = n_blocks
         self._rng = random.Random()
 
         # Encode all programs up-front and filter by minimum length.
@@ -75,7 +80,7 @@ class JEPADataset(Dataset):
     def __getitem__(self, index: int) -> JEPASample:
         token_ids = self._samples[index]
         tokens = self._tokenizer.decode(token_ids.tolist(), skip_special_tokens=False)
-        structural_mask = sample_structural_mask(tokens, rng=self._rng)
+        structural_mask = sample_structural_mask(tokens, n_blocks=self._n_blocks, rng=self._rng)
         return JEPASample(token_ids=token_ids, structural_mask=structural_mask)
 
 

@@ -67,16 +67,23 @@ def find_maskable_blocks(tokens: list[str]) -> list[tuple[int, int]]:
 
 def sample_structural_mask(
     tokens: list[str],
+    n_blocks: int = 1,
     rng: random.Random | None = None,
 ) -> torch.Tensor:
     """Sample a structural boolean mask for a token sequence.
 
-    Randomly selects one maskable structural block and marks all its token
-    positions as True. If the sequence contains no structural blocks (e.g.
-    a one-liner), the returned mask is all False.
+    Randomly selects up to n_blocks maskable structural blocks and marks all
+    their token positions as True. Blocks are sampled without replacement from
+    the available candidates. If n_blocks > available blocks, all blocks are
+    masked. If the sequence contains no structural blocks (e.g. a one-liner),
+    the returned mask is all False.
+
+    Increasing n_blocks makes the pre-training task harder: the predictor
+    must reconstruct larger masked regions, reducing the risk of collapse.
 
     Args:
         tokens: List of token strings for a single sequence.
+        n_blocks: Number of structural blocks to mask. Must be >= 1.
         rng: Random number generator. Uses a default instance if None.
 
     Returns:
@@ -91,6 +98,8 @@ def sample_structural_mask(
     if not blocks:
         return mask
 
-    start, end = rng.choice(blocks)
-    mask[start:end + 1] = True
+    chosen = rng.sample(blocks, k=min(n_blocks, len(blocks)))
+    for start, end in chosen:
+        mask[start:end + 1] = True
+
     return mask

@@ -25,6 +25,7 @@ config = PretrainConfig(
         ),
         ema_decay=0.999,
     ),
+    n_blocks=3,
     n_epochs=50,
     batch_size=32,
     learning_rate=3e-4,
